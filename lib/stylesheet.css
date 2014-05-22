@@ -1,0 +1,35 @@
+WindowBase > #Wrapper > #Header {
+  /*background-image: url('title_lib');*/ }
+
+AbstractList > #qt_scrollarea_viewport > #Container {
+  background-color: none;
+  border: none; }
+  AbstractList > #qt_scrollarea_viewport > #Container > #Header {
+    border: none;
+    background-color: #252525; }
+
+TreeWidget {
+  min-height: 25px;
+  background-color: none;
+  border: none; }
+  TreeWidget:hover {
+    background-color: #4c4c4c; }
+  TreeWidget:pressed {
+    background-color: #b2b2b2; }
+  TreeWidget:checked {
+    background-color: #191919; }
+  TreeWidget:checked:hover {
+    background-color: #262626; }
+
+#Sidebar {
+  background-color: #4b4b4b;
+  min-width: 200px; }
+  #Sidebar QPushButton {
+    border-style: solid;
+    border-width: 1px;
+    border-left-color: #656565;
+    border-right-color: #323232;
+    border-top-color: #656565;
+    border-bottom-color: #323232;
+    min-height: 20px;
+    background-color: #656565; }

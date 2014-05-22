@@ -1,0 +1,65 @@
+$dark:      rgb(25, 25, 25);
+$mid:       rgb(50, 50, 50);
+$bright:    rgb(75, 75, 75);
+
+$red:       hsl(0, 50%, 50%);
+$green:     hsl(90%, 50%, 20%);
+$highlight: hsl(35%, 50%, 80%);
+
+$nodeHeight: 30px;
+
+
+@mixin outset {
+    border-style: solid;
+    border-width: 1px;
+    border-left-color: lighten($bright, 10%);
+    border-right-color: darken($bright, 10%);
+    border-top-color: lighten($bright, 10%);
+    border-bottom-color: darken($bright, 10%);
+}
+
+@mixin inset {
+    border-style: solid;
+    border-width: 1px;
+    border-left-color: darken($mid, 5%);
+    border-right-color: lighten($mid, 20%);
+    border-top-color: darken($mid, 5%);
+    border-bottom-color: lighten($mid, 20%);
+}
+
+WindowBase > #Wrapper > #Header {
+    /*background-image: url('title_lib');*/
+}
+
+AbstractList > #qt_scrollarea_viewport > #Container {
+    background-color: none;
+    border: none;
+
+    > #Header {
+        border: none;
+        background-color: darken($mid, 5%);
+    }
+}
+
+TreeWidget {
+    min-height: 25px;
+    background-color: none;
+    border: none;
+
+    &:hover {background-color: lighten($mid, 10)}
+    &:pressed {background-color: lighten($mid, 50)}
+    &:checked {background-color: $dark}
+    &:checked:hover {background-color: lighten($dark, 5)}
+}
+
+
+#Sidebar {
+    background-color: $bright;
+    min-width: 200px;
+    
+    QPushButton {
+        @include outset;
+        min-height: 20px;
+        background-color: lighten($bright, 10);
+    }
+}
