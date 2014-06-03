@@ -12,12 +12,13 @@ def main(url, representation=None, service=None):
                                   # service=service)
         widget = lib.widget.Lib()
         app.init_widget(widget)
-        app.load(url)
+        # app.load(url)
 
 
 if __name__ == '__main__':
     import pifou
     pifou.setup_log()
+    pifou.setup_log('lib')
 
     main(
         url='/s/content/jobs/machine/content/assets',

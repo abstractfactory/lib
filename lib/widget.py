@@ -64,6 +64,7 @@ class Lib(pigui.widgets.pyqt5.application.Base):
     def init_application(self, application):
         application.loaded.connect(self.load)
         application.killed.connect(self.killed_event)
+        application.information.connect(self.notify)
         self.application = application
 
     def killed_event(self):

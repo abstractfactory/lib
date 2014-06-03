@@ -1,291 +1,317 @@
+"""
+Who decides which command is associated with which receiver?
+    At the moment, the receiver is attached on the server-end,
+    with no hint coming from the client-side.
+
+    Is it the clients responsibility to know which receiver
+    to operate on?
+
+"""
+
 # standard library
+import logging
 import threading
 import Queue as queue
 
 # pifou library
 import pifou.lib
+import pifou.com.util
+import pifou.com.error
+import pifou.com.command
+import pifou.com.constant
+import pifou.com.pyzmq.endpoint
 
 # pifou dependencies
 import zmq
 
+# local library
+import lib
 
-class Incomplete(Exception):
-    pass
+log = logging.getLogger()
+if not log.handlers:
+    lib.setup_log()
 
+local_ip = pifou.com.util.local_ip()
 
-class AbstractMessage(object):
-    def to_message(self):
-        pass
-
-    def from_message(self, message):
-        pass
-
-
-class AbstractRequest(AbstractMessage):
-    COMMAND = 'command'
-    ID = 'id'
-    IP = 'ip'
-    PORT = 'port'
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    @classmethod
-    def from_message(cls, message):
-        pass
-
-    def to_message(self):
-        pass
-
-
-class AbstractResponse(AbstractMessage):
-    OK = 'ok'
-    FAIL = 'fail'
-
-    def __init__(self, status):
-        self.status = status
-
-    @classmethod
-    def from_message(cls, message):
-        return cls(status=message.get('status'))
-
-    def to_message(self):
-        return {
-            'status': self.status
-        }
-
-
-class Request(AbstractRequest):
-    """Sent asynchronously, from client to server
-     __________          __________
-    |          |        |          |
-    |  Server  | -----> |  Client  |
-    |__________|        |__________|
-
-    """
-
-
-class Response(AbstractResponse):
-    """Sent synchronously, to confirm request
-     __________          __________
-    |          |        |          |
-    |  Server  | <----- |  Client  |
-    |__________|        |__________|
-
-    """
-
-
-class Result(AbstractResponse):
-    """Sent asynchronously, with results from command
-     __________          __________
-    |          |        |          |
-    |  Server  | -----> |  Client  |
-    |__________|        |__________|
-
-    """
+# Shorthands
+constant = pifou.com.constant
+endpoint = pifou.com.pyzmq.endpoint
 
 
 @pifou.lib.log
 class Server(object):
 
-    commands = {}  # Executed commands
-    clients = {}  # Connected clients
     queue = queue.Queue()  # Commands about to be executed
+    commands = dict()  # Executed commands
+    clients = dict()  # Connected clients
 
     def __init__(self, receiver):
-        context = zmq.Context()
-        incoming = context.socket(zmq.REP)
-
-        self.incoming = incoming
-        self.context = context
         self.receiver = receiver
 
-        self.listen()
+        init_in = "tcp://*:7000"
+        commands_in = "tcp://*:7001"
+        commands_out = "tcp://localhost:7002"
 
-    def listen(self):
-        self.incoming.bind("tcp://*:6000")
+        self.init_in = endpoint.create_consumer(init_in)
+        self.commands_in = endpoint.create_consumer(commands_in)
+        self.commands_out = endpoint.create_producer(commands_out)
 
-        def process_incoming():
+        self.init_listen()
+        self.commands_listen()
+
+    def commands_listen(self):
+        def process_command(in_message):
+            """
+                __________
+               |          |
+               |   /\/\   |
+               |__________|
+
+            """
+
+            out_message = {constant.STATUS: constant.FAIL}
+
+            client_id = in_message[constant.ID]
+            commands_out = self.clients[client_id]
+
+            command, args, kwargs = (
+                in_message[constant.COMMAND],
+                in_message.get(constant.ARGS, []),
+                in_message.get(constant.KWARGS, {}))
+
+            try:
+                command_cls = COMMANDS[command]
+            except KeyError:
+                out_message[constant.INFO] = "%r not available" % command
+                return out_message
+
+            kwargs['receiver'] = self.receiver
+            command_inst = command_cls(*args, **kwargs)
+
+            # Store in queue
+            #  _________
+            # |         |
+            # |    |    |
+            # |    V    |
+            # |_________|
+
+            item = (command_inst,
+                    commands_out)
+
+            # Queue request
+            self.log.info("Storing %r in queue" % command)
+            self.queue.put(item)
+            self.log.info("Stored")
+
+            out_message[constant.STATUS] = constant.OK
+
+            if command_inst.blocking is True:
+                self.log.info("-|-  Blocking..")
+                self.queue.join()
+                self.log.info("---  Unblocking")
+
+            return out_message
+
+        def thread():
             while True:
-                message = self.incoming.recv_json()
-                command = message['command']
-                command_obj = COMMANDS[command].from_message(message)
+                #  __________
+                # |          |
+                # |   <---   |
+                # |__________|
+                in_message = self.commands_in.recv_json()
 
-                if command == 'connect':
-                    command_obj.receiver = self
+                #  __________
+                # |          |
+                # |   /\/\   |
+                # |__________|
+                out_message = process_command(in_message)
 
-                else:
-                    command_obj.receiver = self.receiver
-
-                # Queue command
-                self.queue.put(command_obj)
-
-                response = Result(status='ok')
-                message = response.to_message()
-                self.incoming.send_json(message)
+                # Prepare output
+                #  __________
+                # |          |
+                # |   --->   |
+                # |__________|
+                self.commands_in.send_json(out_message)
 
         # Start receiver
-
-        receiver_thread = threading.Thread(target=process_incoming)
+        receiver_thread = threading.Thread(target=thread,
+                                           name='receiver_thread')
         receiver_thread.daemon = True
         receiver_thread.start()
-        self.log.info("    Server started")
+        self.log.info("Listening on commands")
 
         # Start worker
-
-        worker_thread = threading.Thread(target=self.worker)
+        worker_thread = threading.Thread(target=self.worker,
+                                         name='worker_thread')
         worker_thread.daemon = True
         worker_thread.start()
-        self.log.info("    Worker started")
+        self.log.info("Worker started")
+
+    def init_listen(self):
+        """Init channel"""
+
+        def process_init(in_message):
+            command, args, kwargs = (in_message[constant.COMMAND],
+                                     in_message.get(constant.ARGS, []),
+                                     in_message.get(constant.KWARGS, {}))
+
+            out_message = {constant.STATUS: constant.FAIL}
+
+            if command == 'clients':
+                out_message[constant.RESULT] = self.clients.keys()
+                out_message[constant.STATUS] = constant.OK
+
+            elif command == 'connect':
+                client = in_message[constant.ID]
+
+                producer = endpoint.create_producer(client)
+                self.clients[client] = producer
+
+                info = "%s registered" % client
+                out_message[constant.STATUS] = constant.OK
+                out_message[constant.INFO] = info
+                self.log.info(info)
+
+            return out_message
+
+        def thread():
+            while True:
+                #  __________
+                # |          |
+                # |   <---   |
+                # |__________|
+                in_message = self.init_in.recv_json()
+
+                #  __________
+                # |          |
+                # |   /\/\   |
+                # |__________|
+                out_message = process_init(in_message)
+
+                # Prepare output
+                #  __________
+                # |          |
+                # |   --->   |
+                # |__________|
+                self.init_in.send_json(out_message)
+
+        init_thread = threading.Thread(target=thread,
+                                       name='init_thread')
+        init_thread.daemon = True
+        init_thread.start()
+        self.log.info("Listening on init")
 
     def worker(self):
-        """This function is in charge of execution ordering.
+        """This function is responsible for the order of execution.
+        _                                    _
+        |  ___    ___    ___    ___          |
+        | | 0 |  | 1 |  | 2 |  | 3 |         |
+        | |___|  |___|  |___|  |___|         |
+        |____________________________________|
 
-        It makes sure that commands are executed in the order that
-        they are received; regardless of them being either synchronous
-        or asynchronous.
+        Both synchronous and asynchronous commands are stored
+        in this queue.
+
+        Note:
+            This method can never fail. Failure is handled by client.
 
         """
 
         while True:
-            command = self.queue.get(block=True)
+            command, commands_out = self.queue.get(block=True)
 
-            message = {'status': 'fail', 'result': None}
+            # Prepare output
+            #  __________
+            # |          |
+            # |   ~~~>   |
+            # |__________|
+
+            message = {constant.STATUS: constant.FAIL}
+
+            # Execute command
+            #  ___________
+            # |           |
+            # |    ...    |
+            # |___________|
+
+            self.log.info("Executing command.. %s" % command)
 
             try:
-                message['result'] = command.do()
+                return_value = command.do()
+                message[constant.RESULT] = return_value
+                message[constant.STATUS] = constant.OK
+                self.log.info("Command executed")
 
             except Exception as e:
-                message['error'] = str(e)
+                message[constant.INFO] = str(e)
+                self.log.error("Command failed")
+
+            # Return value to client
+            #  __________
+            # |          |
+            # |   --->   |
+            # |__________|
+
+            self.log.info("--> Returning results..")
+
+            commands_out.send_json(message)
+
+            # Await confirmation
+            #  __________
+            # |          |
+            # |   <---   |
+            # |__________|
+
+            self.log.info("    Results returned, awaiting confirmation..")
+            message = commands_out.recv_json()
+            self.log.info("<-- Confirmation received")
+
+            if message[constant.STATUS] != constant.OK:
+                self.log.error("    Client reported failure")
 
             self.queue.task_done()
 
-    def execute(self, command):
-        self.log.info("    Executing command: %s" % command)
-        return command.do()
+            if self.queue.empty():
+                self.log.info("Queue is empty")
 
     def stop(self):
         self.incoming.close()
         print "Server stopped"
 
-    def register(self, endpoint):
-        # endpoint = "tcp://{ip}:{port}".format(ip=ip, port=port)
 
-        if not endpoint in self.clients:
-            channel = self.context.socket(zmq.REQ)
-            self.log.info("Connecting to client @ %s" % endpoint)
-            # channel.connect(endpoint)
-            self.log.info("Connected")
-
-            self.clients[endpoint] = channel
-            self.log.info("%s registered" % endpoint)
-        else:
-            self.log.warning("%s already registered" % endpoint)
-
-
-class Signature(Exception):
-    """Raised when there is an error in the argument signature"""
-    pass
-
-
-def name_from_command(command):
-    if hasattr(command, '__name__'):
-        base = command
-    else:
-        base = command.__class__
-    return base.__name__.rsplit("Command", 1)[0].lower()
-
-
-class AbstractCommand(Request):
-    """Abstract base class for all commands
-
-    Differences between zerocommand:
-        Here, we instantiate commands prior to sending them across
-        the network. Commands are marshalled and unmarshalled and
-        finally executed.
-
-        This means that commands contain not only their target
-        receiver and state, but also each argument used in the
-        execution.
-
-            >>> command.do()
-            # Arguments are given prior to running do()
-
-        The benefit is that the server may call upon do(), without
-        knowing which arguments it takes or what it will do.
-
-        Another benefit is that we may use command objects as a means
-        of checking that we pass along the appropriate signature, prior
-        to sending the command:
-
-            >>> {'command': 'load', 'blocking': False}
-            # Here, the signature is wrong, but we won't know until
-            #
-
-    """
-
-    blocking = False
-
-    def __init__(self, receiver=None):
-        self.receiver = receiver
-        self.state = {}
-
-    def to_message(self):
-        return {
-            'command': name_from_command(self),
-            'blocking': self.blocking
-        }
-
-    def do(self, *args):
-        return
-
-
-class ConnectCommand(AbstractCommand):
-    def __init__(self, endpoint=None, *args, **kwargs):
+class ConnectCommand(pifou.com.command.AbstractCommand):
+    def __init__(self, endpoint, *args, **kwargs):
         super(ConnectCommand, self).__init__(*args, **kwargs)
         self.endpoint = endpoint
 
     def do(self):
         self.receiver.register(self.endpoint)
 
-    @classmethod
-    def from_message(cls, message):
-        return cls(endpoint=message['endpoint'])
 
-    def to_message(self):
-        message = super(ConnectCommand, self).to_message()
-        message.update({'endpoint': self.endpoint})
-        return message
-
-
-class ImportCommand(AbstractCommand):
-    def __init__(self, path=None, *args, **kwargs):
+class ImportCommand(pifou.com.command.AbstractCommand):
+    def __init__(self, path, *args, **kwargs):
         super(ImportCommand, self).__init__(*args, **kwargs)
         self.path = path
 
     def do(self):
         if not self.receiver:
-            raise Incomplete("Command has no receiver")
+            raise pifou.com.error.Incomplete("Command has no receiver")
 
         return self.receiver.import_file(path=self.path)
 
-    @classmethod
-    def from_message(cls, message):
-        return cls(path=message['path'])
 
-    def to_message(self):
-        message = super(ImportCommand, self).to_message()
-        message.update({'path': self.path})
-        return message
-
-
-class ReferenceCommand(AbstractCommand):
+class ReferenceCommand(pifou.com.command.AbstractCommand):
     def do(self):
         return self.receiver.import_reference(path=self.path)
 
 
 COMMANDS = {}
-for command in (ConnectCommand,
-                ImportCommand,
-                ReferenceCommand):
-    COMMANDS[name_from_command(command)] = command
+for command in (
+        ConnectCommand,
+        ImportCommand,
+        ReferenceCommand,
+        pifou.com.command.TimeCommand,
+        pifou.com.command.SleepCommand,
+        ):
+
+    COMMANDS[pifou.com.command.name(command)] = command

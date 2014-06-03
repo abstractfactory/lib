@@ -1,4 +1,7 @@
 
+# standard library
+import threading
+
 # pifou library
 import pifou.lib
 import pifou.signal
@@ -8,20 +11,20 @@ import pifou.pom.node
 import pifou.com.util
 import pifou.com.pyzmq.rpc
 
+import pifou.com.pyzmq.endpoint
+import pifou.com.constant
+
 # pifou dependencies
 import zmq
 
-import lib.command
-
-# Each running client will have a unique ID
-# The server uses this ID to separate between commands
-# being executed and allows multiple clients to undo/redo
-# their own individual commands.
-# UUID = str(uuid.uuid4())
-# client_endpoint = "tcp://*:6001"#.format(ip=pifou.com.util.local_ip())
-
 context = zmq.Context()
+
 local_ip = pifou.com.util.local_ip()
+
+# Shorthands
+protocol = "tcp://{ip}:{port}"
+constant = pifou.com.constant
+endpoint = pifou.com.pyzmq.endpoint
 
 
 @pifou.lib.Process.cascading
@@ -37,87 +40,116 @@ def hide_extensions(node):
 class Invoker(object):
     """Resolve requests and maintain history/future"""
 
-    MAX_RETRIES = 3
-    CLIENT_ENDPOINT = "tcp://{ip}:6002"
+    def __init__(self, ip='127.0.0.1'):
+        """
+        Channels:
+            Commands (async) - Send commands and receive results
+            Init (sync) - Configure server
 
-    def __init__(self, ip='localhost', port='6000'):
-        self.outgoing = context.socket(zmq.REQ)
-        self.incoming = context.socket(zmq.REP)
+        Args:
+            ip (str): IP to connect
+            port (str): Port to connect
 
-        self.outgoing_ip = ip
-        self.outgoing_port = port
+        """
 
-        self.connect()
+        self.information = pifou.signal.Signal(header=str, body=str)
 
-    def connect(self):
-        """Register invoker with receiver"""
-
-        # Outgoing
+        # Prepare out-messages
         #  __________
         # |          |
         # |   --->   |
         # |__________|
 
-        endpoint = "tcp://{ip}:{port}".format(
-            ip=self.outgoing_ip,
-            port=self.outgoing_port)
+        init_out = "tcp://localhost:7000"
+        commands_in = "tcp://*:7002"
+        commands_out = "tcp://localhost:7001"
 
-        self.log.info("Connecting to %s.." % endpoint)
-        self.outgoing.connect(endpoint)
-        self.log.info("Connected.")
+        self.init_out = endpoint.create_producer(init_out)
+        self.commands_in = endpoint.create_consumer(commands_in)
+        self.commands_out = endpoint.create_producer(commands_out)
 
-        # Incoming
+        # Prepare in-messages
         #  __________
         # |          |
         # |   <---   |
         # |__________|
 
-        bind_endpoint = self.CLIENT_ENDPOINT.format(ip='*')
-        self.log.info("Binding to %s.." % bind_endpoint)
-        self.incoming.bind(bind_endpoint)
-        self.log.info("Bound")
+        self.register("tcp://%s:6000" % local_ip)
+        self.listen_commands()
 
-        connect_endpoint = self.CLIENT_ENDPOINT.format(ip=local_ip)
-        command = lib.command.ConnectCommand(endpoint=connect_endpoint)
-        message = command.to_message()
+    def listen_commands(self):
+        def process_command(message):
+            info = message.get(constant.INFO)
+            error = message.get(constant.ERROR)
 
-        self.log.info("Registering %r with server" % connect_endpoint)
-        self.outgoing.send_json(message)
-        message = self.outgoing.recv_json()
-        response = lib.command.Response.from_message(message)
-        self.log.info("Registered.")
+            if info:
+                self.log.info(info)
+                self.information.emit(header='Results',
+                                      body=info)
 
-        if not response.status == response.OK:
-            print response.status
+            if error:
+                self.log.error(error)
+                self.information.emit(header='Error',
+                                      body=error)
+
+            message = {constant.STATUS: constant.OK}
+            return message
+
+        def thread():
+            while True:
+                #  __________
+                # |          |
+                # |   <---   |
+                # |__________|
+                in_message = self.commands_in.recv_json()
+
+                #  __________
+                # |          |
+                # |   /\/\   |
+                # |__________|
+                out_message = process_command(in_message)
+
+                # Prepare output
+                #  __________
+                # |          |
+                # |   --->   |
+                # |__________|
+                self.commands_in.send_json(out_message)
+
+        thread = threading.Thread(target=thread,
+                                  name='listen_commands')
+        thread.daemon = True
+        thread.start()
+
+        self.log.info("Listening on commands..")
+
+    def register(self, endpoint):
+        message = {'command': 'connect', 'id': endpoint}
+        self.init_out.send_json(message)
+        self.init_out.recv_json()
+        self.commands_id = endpoint
 
     def import_(self, path):
-        command = lib.command.ImportCommand(path)
-        return self.execute(command)
+        return self.execute('import', path)
 
-    def execute(self, command):
+    def execute(self, command, *args, **kwargs):
         """Perform command"""
-        command.id = self.CLIENT_ENDPOINT.format(ip=local_ip)
 
-        message = command.to_message()
+        message = {
+            constant.COMMAND: command,
+            constant.ARGS: args,
+            constant.KWARGS: kwargs,
+            constant.ID: self.commands_id
+        }
 
-        self.log.info("Sending command..")
-        self.outgoing.send_json(message)
-        self.log.info("Complete.. awaiting response..")
-        message = self.outgoing.recv_json()
+        self.commands_out.send_json(message)
+        confirmation = self.commands_out.recv_json()
 
-        response = lib.command.Response.from_message(message)
+        if confirmation[constant.STATUS] != constant.OK:
+            error_message = confirmation[constant.INFO]
+            self.log.error(error_message)
 
-        self.log.info("Response received")
-
-        if not response.status == 'ok':
-            print "Request failed"
-
-    def listen(self):
-        pass
-        # def result_from_commands():
-        #     while True:
-        #         message = self.results.recv_json()
-        #         reply = lib.command.Result.from_message(message)
+        return message
 
 
 @pifou.lib.log
@@ -143,10 +175,14 @@ class Lib(object):
         # Signal
         self.loaded = pifou.signal.Signal(node=object)
         self.killed = pifou.signal.Signal()
+        self.information = pifou.signal.Signal(header=str, body=str)
 
         self.node = None
 
-        self.invoker = Invoker()
+        invoker = Invoker()
+        invoker.information.connect(self.information)
+
+        self.invoker = invoker
 
     def init_widget(self, widget):
         widget.init_application(self)
@@ -168,5 +204,8 @@ class Lib(object):
         self.node = node
 
     def import_event(self, path):
-        print "Importing %s" % path
         self.invoker.import_(path)
+
+
+if __name__ == '__main__':
+    pass

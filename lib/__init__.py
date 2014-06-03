@@ -1,2 +1,2 @@
 import pifou
-pifou.setup_log('lib')
+setup_log = lambda root='lib': pifou.setup_log(root)

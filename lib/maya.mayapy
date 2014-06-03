@@ -1,11 +1,10 @@
-import pifou
+import logging
+
+import lib
 import lib.command
 import pimay.com.service
 
-reload(lib.command)
-reload(pimay.com.service)
-
-receiver = pimay.com.service.MayaService()
+receiver = pimay.com.service
 server = lib.command.Server(receiver)
 
 
