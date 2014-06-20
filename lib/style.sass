@@ -1,0 +1,52 @@
+$dark:      rgb(25, 25, 25)
+$mid:       rgb(50, 50, 50)
+$bright:    rgb(75, 75, 75)
+
+$red:       hsl(0, 50%, 50%)
+$brown:     hsl(20%, 50%, 30%)
+$green:     hsl(90%, 50%, 20%)
+$highlight: hsl(35%, 50%, 80%)
+
+$nodeHeight: 30px
+
+
+@mixin outset
+    border-style: solid
+    border-width: 1px
+    border-left-color: lighten($bright, 10%)
+    border-right-color: darken($bright, 10%)
+    border-top-color: lighten($bright, 10%)
+    border-bottom-color: darken($bright, 10%)
+
+
+@mixin inset
+    border-style: solid
+    border-width: 1px
+    border-left-color: darken($mid, 5%)
+    border-right-color: lighten($mid, 20%)
+    border-top-color: darken($mid, 5%)
+    border-bottom-color: lighten($mid, 20%)
+
+
+#Canvas
+    @include inset
+    background-color: $mid
+
+
+VersionDelegate
+    @include inset
+    background-color: $dark
+    margin: 3px 3px 0px 3px
+    padding-left: 3px
+    text-align: left
+    border-right: 3px solid $red
+    border-right: 3px solid orange
+
+    &:hover
+        background-color: $brown
+    &:checked
+        background-color: lighten($brown, 10%)
+    &:checked:hover
+        background-color: lighten($brown, 15%)
+    &:pressed
+        background-color: lighten($brown, 20%)

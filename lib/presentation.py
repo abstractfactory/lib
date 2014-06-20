@@ -1,28 +1,37 @@
-from __future__ import absolute_import
+# from __future__ import absolute_import
 
-import lib.widget
+import lib.controller
 import lib.application
 
 
-def main(url, representation=None, service=None):
-    import pigui.util.pyqt5
+def main(path, port=None):
+    import pigui.pyqt5.util
 
-    with pigui.util.pyqt5.app_context():
-        app = lib.application.Lib(representation=representation)
-                                  # service=service)
-        widget = lib.widget.Lib()
-        app.init_widget(widget)
-        # app.load(url)
+    application = lib.application.Lib(port)
+
+    with pigui.pyqt5.util.application_context():
+        controller = lib.controller.Lib()
+
+        model = lib.model.Model()
+        controller.set_model(model)
+        application.set_model(model)
+
+        application.set_controller(controller)
+
+        controller.resize(*lib.settings.WINDOW_SIZE)
+        controller.animated_show()
+
+        model.setup(path)
 
 
 if __name__ == '__main__':
+    """Example"""
+
     import pifou
     pifou.setup_log()
     pifou.setup_log('lib')
 
     main(
-        url='/s/content/jobs/machine/content/assets',
-        representation=None,
-        # service='im.local'
-        service='maya.local'
+        path=r'C:\studio\content\jobs\machine\content',
+        port=None
     )

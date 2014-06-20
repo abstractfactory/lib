@@ -1,81 +1,35 @@
+import lib.delegate
 
-# pifou library
-import pifou.lib
-import pifou.signal
-import pifou.pom.node
-import pifou.com.source
+import pigui.pyqt5.model
+import pigui.pyqt5.widgets.delegate
+import pigui.pyqt5.widgets.list.view
 
-# pigui library
-import pigui.widgets.pyqt5.list.view
-import pigui.widgets.pyqt5.miller.view
-
-# local library
-import lib.item
+DefaultList = pigui.pyqt5.widgets.list.view.DefaultList
 
 
-class List(pigui.widgets.pyqt5.list.view.DefaultList):
+def create_delegate(self, index):
+    typ = self.model.data(index, 'type')
 
-    predicate = pigui.widgets.pyqt5.miller.view.DefaultMiller
-
-    def __init__(self, *args, **kwargs):
-        super(List, self).__init__(*args, **kwargs)
-
-    def item_added_event(self, item):
-        super(List, self).item_added_event(item)
-
-    def load(self, item):
-        super(List, self).load(item)
-
-        if item.node.isparent:
-            self.append_merged_items(item)
+    if typ == 'disk':
+        label = self.model.data(index, 'display')
+        if self.model.data(index, key='group'):
+            return lib.delegate.FolderDelegate(label, index)
         else:
-            self.append_file_commands(item)
+            return lib.delegate.FileDelegate(label, index)
 
-    def append_merged_items(self, item):
-        """
-         _______
-        |       |
-        | Merge |
-        |_______|
+    elif typ == 'version':
+        label = self.model.data(index, 'display')
+        return lib.delegate.VersionDelegate(label, index)
 
-        """
+    elif typ == 'command':
+        label = self.model.data(index, 'command')
+        return pigui.pyqt5.widgets.delegate.CommandDelegate(label, index)
 
-        # Add anything under $CD/public
-        path = item.node.path
-        path = path + 'public'
-
-        # .copy rather than instantiate a new, so as
-        # to maintain any processes present within
-        # the original.
-        public = item.node.copy(path=path.as_str)
-
-        pifou.com.source.disk.pull(public)
-        for version in public:
-            version_item = item.from_node(version)
-            self.add_item(version_item)
-
-        # Add anything under $CD/public/$REPRESENTATION
-
-    def append_file_commands(self, item):
-        """
-         _________________
-        |                 |
-        |  File Commands  |
-        |_________________|
-
-        """
-
-        for command in ('import', 'reference'):
-            command_item = lib.item.Item.from_type('%s.command' % command)
-            command_item.data['command'] = command
-            command_item.data['subject'] = item
-            pol = command_item.sortpolicy
-            pol.position = pol.AlwaysAtBottom
-            self.add_item(command_item)
-
-            if command == 'reference':
-                command_item.widget.setEnabled(False)
+    else:
+        return super(DefaultList, self).create_delegate(index)
 
 
-def register():
-    pigui.widgets.pyqt5.miller.view.DefaultMiller.register(List)
+def monkey_patch():
+    """The alteration is minimal enough for
+    a monkey-patch to suffice"""
+    DefaultList.create_delegate = create_delegate
