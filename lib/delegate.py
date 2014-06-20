@@ -45,7 +45,21 @@ class FolderDelegate(pigui.pyqt5.widgets.delegate.FolderDelegate):
 
 
 class FileDelegate(pigui.pyqt5.widgets.delegate.FileDelegate):
-    pass
+    def selected_event(self):
+        state = pigui.pyqt5.event.SelectedEvent.SelectedState
+        event = pigui.pyqt5.event.SelectedEvent(state=state,
+                                                index=self.index)
+        QtWidgets.QApplication.postEvent(self, event)
+
+        self.setChecked(True)
+
+    def deselected_event(self):
+        state = pigui.pyqt5.event.SelectedEvent.DeselectedState
+        event = pigui.pyqt5.event.SelectedEvent(state=state,
+                                                index=self.index)
+        QtWidgets.QApplication.postEvent(self, event)
+
+        self.setChecked(False)
 
 
 class VersionDelegate(FolderDelegate):

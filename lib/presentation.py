@@ -4,13 +4,13 @@ import lib.controller
 import lib.application
 
 
-def main(path, port=None):
+def main(path, port=None, support=tuple()):
     import pigui.pyqt5.util
 
-    application = lib.application.Lib(port)
+    application = lib.application.Lib(port, support)
 
     with pigui.pyqt5.util.application_context():
-        controller = lib.controller.Lib()
+        controller = lib.controller.Lib(support)
 
         model = lib.model.Model()
         controller.set_model(model)

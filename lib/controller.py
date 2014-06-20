@@ -28,9 +28,17 @@ lib.view.monkey_patch()
 
 @pifou.lib.log
 class Lib(pigui.pyqt5.widgets.application.widget.ApplicationBase):
-    import_version = QtCore.pyqtSignal(str)
+    """
+    Signals:
+        import_version (str): A domain-version is being imported
+        import_file (str): A plain file is being imported
 
-    def __init__(self, parent=None):
+    """
+
+    import_version = QtCore.pyqtSignal(str)
+    import_file = QtCore.pyqtSignal(str)
+
+    def __init__(self, support=tuple(), parent=None):
         """
         Arguments:
             parent (QtWidgets.QWidget): Qt parent of this widget
@@ -63,6 +71,7 @@ class Lib(pigui.pyqt5.widgets.application.widget.ApplicationBase):
 
         self.view = view
         self.model = None
+        self.support = support
 
     def set_model(self, model):
         """Set model for this controller
@@ -112,13 +121,22 @@ class Lib(pigui.pyqt5.widgets.application.widget.ApplicationBase):
             Arguments:
                 index (str): Index of file to open
 
+            Sources:
+                Imports may happen on either Versions or Files
+
             """
 
             command = self.model.data(index, key='command')
             if command == 'import':
+                source = self.model.data(index, key='source')
                 parent = self.model.data(index, key='parent')
                 path = self.model.data(parent, key='path')
-                self.import_version.emit(path)
+
+                if source == 'version':
+                    self.import_version.emit(path)
+
+                if source == 'file':
+                    self.import_file.emit(path)
 
                 basename = os.path.basename(path)
                 self.notify("Importing %s" % basename)

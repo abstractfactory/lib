@@ -12,3 +12,5 @@ features:
 * junction
 * direct host I/O
 * routed host I/O
+* bookmarks
+* tabs

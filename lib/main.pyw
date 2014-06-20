@@ -14,9 +14,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('path')
     parser.add_argument('--port', default=None)
+    parser.add_argument('--support', default=tuple())
 
     args = parser.parse_args()
 
     from lib import presentation
     presentation.main(path=args.path,
-                      port=args.port)
+                      port=args.port,
+                      support=args.support)
