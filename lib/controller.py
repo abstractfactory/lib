@@ -14,7 +14,7 @@ from PyQt5 import QtWidgets
 import pigui
 import pigui.style
 import pigui.pyqt5.widgets.delegate
-import pigui.pyqt5.widgets.application
+import pigui.pyqt5.widgets.application.widget
 import pigui.pyqt5.widgets.miller.view
 
 # local library
