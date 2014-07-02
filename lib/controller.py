@@ -73,6 +73,8 @@ class Lib(pigui.pyqt5.widgets.application.widget.ApplicationBase):
         self.model = None
         self.support = support
 
+        print "Running Controller"
+
     def set_model(self, model):
         """Set model for this controller
 

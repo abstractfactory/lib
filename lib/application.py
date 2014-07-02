@@ -1,4 +1,9 @@
+"""Business-logic of Lib"""
+
 import os
+
+# pifou library
+import pifou.lib
 
 # local library
 import lib.model
@@ -9,12 +14,35 @@ import lib.controller
 import zmq
 
 
+@pifou.lib.log
 class Lib(object):
-    def __init__(self, port=None, support=tuple()):
+    """Lib Application
+
+    Arguments:
+        outport (int): Port at which to transmit messages
+        support (tuple): File-extensions to display commands for
+
+    Attributes:
+        controller: Associated controller to this application
+        model: Associated model to this application
+        outsocket: Reference to socket used to transmit messages
+
+    """
+
+    def __init__(self, outport=None, support=tuple()):
         self.controller = None
         self.model = None
-        self.port = port
+        self.outport = outport
         self.support = support
+        self.outsocket = None
+
+        if outport:
+            self.log.info("Establishing connection to {}".format(outport))
+            context = zmq.Context.instance()
+            self.outsocket = context.socket(zmq.PUSH)
+            self.outsocket.connect("tcp://127.0.0.1:{}".format(outport))
+        else:
+            self.log.warning("Offline..")
 
     def set_model(self, model):
         self.model = model
@@ -25,28 +53,44 @@ class Lib(object):
         controller.import_file.connect(self.import_file)
 
     def import_version(self, path):
-        """Import domain-version `path`
+        """Import domain-version at `path`
 
         Arguments:
             path (str): Absolute path to domain object
 
         """
 
-        if not self.port:
-            raise ValueError("No receiver found")
+        if not self.outsocket:
+            info = "No receiver found"
+            self.error(info)
+            return self.controller.notify(info)
+
+        info = "Importing domain version: {}".format(path)
+        self.info(info)
 
         supported_ext = self.support
-        files = list()
+        supported_files = list()
 
-        assert os.path.isdir(path)
-        for f in os.listdir(path):
-            name, ext = os.path.splitext(f)
-            if ext.lower() in supported_ext:
-                files.append(f)
+        if not os.path.isdir(path):
+            return self.error('{} is not a directory'.format(path))
 
-        assert len(files) == 1
+        self.log.info("Looking for supported files in domain-version:"
+                      "%r" % supported_ext)
+
+        for _, _, files in os.walk(path):
+            for f in files:
+                name, ext = os.path.splitext(f)
+                if ext.lower() in supported_ext:
+                    supported_files.append(f)
+            break
+
+        if not len(supported_files) == 1:
+            info = "No supported files found"
+            self.log.error(info)
+            return self.error(info)
 
         path = os.path.join(path, files[0])
+        self.info("About to import {}".format(path))
         self.import_file(path)
 
     def import_file(self, path):
@@ -57,18 +101,22 @@ class Lib(object):
 
         """
 
-        msg = {'type': 'command',
-               'command': 'import_version',
-               'path': path}
+        self.outsocket.send_json(
+            {'type': 'command',
+             'command': 'import',
+             'payload': path})
 
-        context = zmq.Context.instance()
-        socket = context.socket(zmq.REQ)
-        socket.connect("tcp://localhost:{}".format(self.port))
-        socket.send_json(msg)
+    def info(self, message):
+        self.log.info(message)
+        self.outsocket.send_json(
+            {'type': 'info',
+             'payload': message})
 
-        recv = socket.recv_json()
-        if not recv.get('status') == 'ok':
-            raise ValueError("Host did not accept: %s -> %s" % (msg, recv))
+    def error(self, message):
+        self.log.error(message)
+        self.outsocket.send_json(
+            {'type': 'error',
+             'payload': message})
 
 
 if __name__ == '__main__':
