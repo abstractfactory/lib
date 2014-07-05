@@ -1,8 +1,10 @@
 
+# standard library
+import os
+
 # pigui library
-import pifou.pom.node
-import pifou.pom.domain
-import pifou.com.source
+import pifou.com
+import pifou.domain.version
 
 # pigui library
 import pigui.pyqt5.model
@@ -11,7 +13,6 @@ import pigui.pyqt5.model
 VERSION = 'version'
 DISPLAY = 'display'
 TYPE = 'type'
-NODE = 'node'
 PATH = 'path'
 COMMAND = 'command'
 SORTKEY = 'sortkey'
@@ -24,56 +25,54 @@ FILE = 'file'
 DISK = 'disk'
 
 
+class Iterator(pifou.com.Iterator):
+    def __init__(self, *args, **kwargs):
+        super(Iterator, self).__init__(*args, **kwargs)
+
+        if not self.filter:
+            self.filter = pifou.com.default_filter
+
+
 class Item(pigui.pyqt5.model.ModelItem):
-    """Wrap pifou.pom.node in ModelItem
+    """Dash-specific item
 
      _______________________
     |          Item         |
     |   ____________________|
     |  |__________________
     | |-                  |
-    | |-  pifou.pom.node  |
+    | |-       path       |
     | |-__________________|
     |__|
 
     """
 
     def data(self, key):
-        """Intercept queries custom to Dash
-
-        Interceptions:
-            disk: Disk queries are wrapped in pifou.pom.node
-            version: Workspaces wrap nodes similar to disk
-
-        """
+        """Intercept queries custom to Dash"""
 
         value = super(Item, self).data(key)
 
         if not value and self.data(TYPE) in (pigui.pyqt5.model.Disk,
                                              VERSION):
-            if key == PATH:
-                node = self.data(NODE)
-                return node.path.as_str
-
             if key == DISPLAY:
-                node = self.data(NODE)
-                if self.data(GROUP):
-                    return node.path.name
-                else:
-                    return node.path.basename
+                path = self.data(PATH)
+                display = os.path.basename(path)
+                self.set_data(DISPLAY, display)
+                return display
 
             if key == GROUP:
-                node = self.data(NODE)
-                return node.isparent
+                path = self.data(PATH)
+                isgroup = os.path.isdir(path)
+                self.set_data(GROUP, isgroup)
+                return isgroup
 
         return value
 
 
 class Model(pigui.pyqt5.model.Model):
     def setup(self, path):
-        node = pifou.pom.node.Node.from_str(path)
         root = self.create_item({TYPE: DISK,
-                                 NODE: node})
+                                 PATH: path})
         self.root_item = root
         self.model_reset.emit()
 
@@ -84,7 +83,7 @@ class Model(pigui.pyqt5.model.Model):
         return item
 
     def pull(self, index):
-        """Pull data off of disk, based on `index`
+        """Pull data off of disk as per `index`
 
         Arguments:
             index (str): Index from which to pull
@@ -94,9 +93,8 @@ class Model(pigui.pyqt5.model.Model):
             version: Data is the domain-object; VERSION
             command: Buttons that operate on `version` and `disk` types
 
-        Item-data
+        Item-data:
             type (str): Type of item
-            node (pifou.pom.node): Domain object used for disk-access
             sortkey (str): Override default sort-key
             command (str): When `type` is `command`, this contains its name
             parent (str): Reference to parent index (convenience data)
@@ -105,26 +103,25 @@ class Model(pigui.pyqt5.model.Model):
         """
 
         if self.data(index, TYPE) == DISK:
-            node = self.data(index, NODE)
+            path = self.data(index, PATH)
 
             if self.data(index, GROUP):
-                try:
-                    pifou.com.source.disk.pull(node)
-                except pifou.error.Exists:
-                    self.status.emit("%s did not exist" % node.path)
+                if os.path.exists(path):
+                    for basename in Iterator(path):
+                        if basename.startswith('.'):
+                            continue
 
-                for child in node.children:
-                    if child.path.name.startswith('.'):
-                        continue
-
-                    self.create_item({TYPE: DISK,
-                                      NODE: child}, parent=index)
+                        full_path = os.path.join(path, basename)
+                        self.create_item({TYPE: DISK,
+                                          PATH: full_path}, parent=index)
+                else:
+                    self.status.emit("%s did not exist" % path)
 
                 # Append versions
-                asset = pifou.pom.domain.Entity.from_node(node)
-                for version in asset.versions:
+                for version in pifou.domain.version.ls(path):
+                    full_path = os.path.join(path, version)
                     self.create_item({TYPE: VERSION,
-                                      NODE: version,
+                                      PATH: full_path,
                                       SORTKEY: '|'}, parent=index)
 
         # Append commands to files and versions
@@ -132,11 +129,11 @@ class Model(pigui.pyqt5.model.Model):
         isfile = self.data(index, GROUP) is False
 
         if isversion or isfile:
-            node = self.data(index, NODE)
+            path = self.data(index, PATH)
 
             for command in ('import',):
                 self.create_item({TYPE: COMMAND,
-                                  NODE: node,
+                                  PATH: path,
                                   COMMAND: command,
                                   SORTKEY: '{',
                                   PARENT: index,
